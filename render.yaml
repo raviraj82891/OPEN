@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: jay-ai-assistant
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false          # set manually in Render dashboard
+      - key: WHISPER_MODEL
+        value: base
+    healthCheckPath: /api/health
