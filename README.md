@@ -156,3 +156,4 @@ Change via `WHISPER_MODEL=small` in `.env`
 
 MIT
 # OPEN
+# OPEN
