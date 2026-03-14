@@ -155,3 +155,4 @@ Change via `WHISPER_MODEL=small` in `.env`
 ## License
 
 MIT
+# OPEN
