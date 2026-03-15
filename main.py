@@ -44,7 +44,7 @@ Rules:
 
 
 # ──────────────────────────────────────────────
-# Global model references
+# Global models
 # ──────────────────────────────────────────────
 
 stt_model = None
@@ -52,7 +52,7 @@ llm_client = None
 
 
 # ──────────────────────────────────────────────
-# Lifespan (startup / shutdown)
+# Lifespan
 # ──────────────────────────────────────────────
 
 @asynccontextmanager
@@ -60,12 +60,17 @@ async def lifespan(app: FastAPI):
     global stt_model, llm_client
 
     print(f"[JAY AI] Loading Whisper ({WHISPER_MODEL_SIZE})...")
-    stt_model = whisper.load_model(WHISPER_MODEL_SIZE)
+
+    # safer loading for low-memory servers
+    stt_model = whisper.load_model(WHISPER_MODEL_SIZE, device="cpu")
+
     print("[JAY AI] Whisper ready.")
 
     if not GROQ_API_KEY:
         print("[JAY AI] WARNING: GROQ_API_KEY is not set!")
+
     llm_client = Groq(api_key=GROQ_API_KEY)
+
     print("[JAY AI] Groq client ready.")
 
     yield
@@ -74,10 +79,14 @@ async def lifespan(app: FastAPI):
 
 
 # ──────────────────────────────────────────────
-# App Init
+# App
 # ──────────────────────────────────────────────
 
-app = FastAPI(title="JAY AI - Live AI Assistant", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="JAY AI - Live AI Assistant",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -145,6 +154,7 @@ async def chat(req: ChatRequest):
     messages += [{"role": m.role, "content": m.content} for m in req.messages]
 
     if req.stream:
+
         def generate():
             stream = llm_client.chat.completions.create(
                 model=LLM_MODEL,
@@ -152,10 +162,12 @@ async def chat(req: ChatRequest):
                 max_tokens=1024,
                 stream=True,
             )
+
             for chunk in stream:
                 delta = chunk.choices[0].delta.content or ""
                 if delta:
                     yield f"data: {json.dumps({'delta': delta})}\n\n"
+
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
@@ -165,6 +177,7 @@ async def chat(req: ChatRequest):
         messages=messages,
         max_tokens=1024,
     )
+
     return {"reply": response.choices[0].message.content}
 
 
@@ -183,13 +196,14 @@ async def voice_pipeline(audio: UploadFile = File(...)):
     try:
         result = stt_model.transcribe(tmp_path, fp16=False)
         transcript = result["text"].strip()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
     finally:
         os.unlink(tmp_path)
 
     if not transcript:
-        return {"transcript": "", "reply": "I didn't catch that. Could you try again?"}
+        return {
+            "transcript": "",
+            "reply": "I didn't catch that. Could you try again?"
+        }
 
     response = llm_client.chat.completions.create(
         model=LLM_MODEL,
@@ -200,7 +214,10 @@ async def voice_pipeline(audio: UploadFile = File(...)):
         max_tokens=512,
     )
 
-    return {"transcript": transcript, "reply": response.choices[0].message.content}
+    return {
+        "transcript": transcript,
+        "reply": response.choices[0].message.content
+    }
 
 
 @app.get("/api/health")
@@ -211,3 +228,19 @@ async def health():
         "llm": LLM_MODEL,
         "models_loaded": stt_model is not None and llm_client is not None,
     }
+
+
+# ──────────────────────────────────────────────
+# Render / Server Start
+# ──────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 10000))
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port
+    )
